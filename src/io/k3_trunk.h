@@ -125,6 +125,11 @@ typedef struct {
                                  * must not be evicted. "Just ahead" counts STREAMING
                                  * layers, not indices, because the prefetcher skips
                                  * pinned ones; see upcoming() in the .c            */
+    int          pass;          /* forward passes started: bumped when the walk goes
+                                 * backwards (a new token restarts at layer 0)     */
+    int          slot_pass[8];  /* [nslot] pass in which each slot was claimed. A layer
+                                 * left from an EARLIER pass is never "upcoming"; see
+                                 * upcoming(). 8 = K3_TRUNK_MAXRING                 */
 
     /* One asynchronous reader keeps the spare ring slots busy. The worker never publishes
      * a layer name before its read succeeds; bind waits for completion before consuming

@@ -668,6 +668,14 @@ static int upcoming(const K3Trunk *tr, int s)
 {
     const int L = tr->layer_of[s];
     if (L <= tr->walk) return 0;
+    /* Loaded in an earlier pass: the walk has wrapped past it, so it is stale however
+     * few streaming layers lie between. The count below cannot see this when the model
+     * has only a few streaming layers (a --layers 3 test stack): with two slots holding
+     * layers 1 and 2 when the walk restarts at 0, both looked "upcoming", nothing was
+     * claimable, and the fetch of layer 0 waited forever on cv_done. The prefetcher
+     * never queues across the wrap, so a slot claimed this pass is the only kind that
+     * can really be ahead of the walk. */
+    if (tr->slot_pass[s] != tr->pass) return 0;
     int ahead = 0;
     for (int n = tr->walk + 1; n < L; n++)
         if (tr->pin_of[n] < 0 && ++ahead >= tr->nslot) return 0;
@@ -689,6 +697,7 @@ static int claim_slot_locked(K3Trunk *tr, K3TrunkIO *io, int L)
         tr->layer_of[s] = -1;                   /* EMPTY before the read, not after */
         io->fresh[s] = 0;
         io->pending[s] = L;
+        tr->slot_pass[s] = tr->pass;
         return s;
     }
     return -1;
@@ -752,6 +761,7 @@ int k3_trunk_fetch(K3Trunk *tr, int L, unsigned char **out)
      * be reused; a short way ahead of it is what the prefetcher has in flight and must
      * not lose. Updated under the lock because claim_slot_locked reads it. */
     pthread_mutex_lock(&io->mu);
+    if (L < tr->walk) tr->pass++;            /* the walk wrapped: a new forward pass */
     tr->walk = L;
     pthread_mutex_unlock(&io->mu);
 
