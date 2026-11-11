@@ -46,9 +46,16 @@ def quant_row_int8(f32_2d):
 
 def main():
     if len(sys.argv) < 3:
-        print("usage: int8_trunk.py <bf16_trunk_dir> <int8_out_dir>")
+        print("usage: int8_trunk.py <bf16_trunk_dir> <int8_out_dir> [--keep SUBSTR,SUBSTR...]")
         return 2
     src, out = sys.argv[1], sys.argv[2]
+    # --keep: tensors whose name contains any of these substrings stay BF16. Meant for
+    # small, sensitive tensors (the MoE router, the AttnRes projections): the binder
+    # widens a BF16 tensor it wants as fp32 exactly as before, so they mix safely with
+    # I8R matmul weights in one layer.
+    keep = []
+    if len(sys.argv) >= 5 and sys.argv[3] == "--keep":
+        keep = [s for s in sys.argv[4].split(",") if s]
     os.makedirs(out, exist_ok=True)
     man = json.load(open(os.path.join(src, "trunk.json")))
     binp = open(os.path.join(src, "trunk.bin"), "rb")
@@ -77,7 +84,7 @@ def main():
         for name, t in items:
             o, nb, dt, shape = t["off"], t["nbytes"], t["dtype"], t.get("shape", [])
             raw = run[o:o + nb]
-            if dt == "BF16" and len(shape) == 2:
+            if dt == "BF16" and len(shape) == 2 and not any(k in name for k in keep):
                 f = bf16_to_f32(np.frombuffer(raw, dtype=np.uint16)).reshape(shape[0], shape[1])
                 enc, enb = quant_row_int8(f)
                 outp.write(enc)
